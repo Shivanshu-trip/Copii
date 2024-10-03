@@ -1,0 +1,137 @@
+Here's a README file tailored for your AutoBI project, taking inspiration from the structure of the VSwarm README:
+ 
+ 
+---
+ 
+<div align="center"><img alt="AutoBI" height="200px" src="./img/logo.png"><h1>AutoBI</h1><p><b>Low code tool to convert text into SQL queries and interact with various databases using LLMs</b></p></div>Table of Contents
+ 
+What is AutoBI?
+ 
+Use Cases
+ 
+Highlights
+ 
+How to Get Started
+ 
+Generate Secret Keys
+ 
+Deploy AutoBI Locally with Docker
+ 
+Deploy AutoBI on a Remote Server
+ 
+ 
+Guides and Concepts
+ 
+Sequential vs Hierarchical Workflows
+ 
+Creating a Skill using Skill Definitions
+ 
+Writing a Custom Skill using LangChain
+ 
+Retrieval Augmented Generation (RAG)
+ 
+Customizing Embedding Models
+ 
+ 
+Contribution
+ 
+License
+ 
+ 
+What is AutoBI?
+ 
+AutoBI is a robust tool that leverages Large Language Models (LLMs) to transform natural language into SQL queries, allowing users to query data from multiple databases with ease. Using LangChain, AutoBI provides a seamless way to interact with PostgreSQL, Redis, and other database systems through an intuitive interface, empowering businesses to extract actionable insights without needing extensive SQL knowledge.
+ 
+Use Cases
+ 
+AutoBI can be applied in a variety of domains, including but not limited to:
+ 
+Business Intelligence: AutoBI enables business users to generate insights from various databases by converting natural language questions into SQL queries.
+ 
+Data Exploration: Analysts can explore datasets in different databases without having to write complex SQL queries.
+ 
+Customer Support: AutoBI can help support teams access data by asking natural language queries, making customer service more efficient.
+ 
+Ad-hoc Reporting: AutoBI allows quick generation of reports by querying multiple tables across databases.
+ 
+ 
+Highlights
+ 
+Persistent conversations: AutoBI saves and maintains conversation histories, enabling continuous and evolving data analysis.
+ 
+Observability: Monitor and track query performance and outputs in real-time, ensuring efficient data retrieval.
+ 
+Tool Calling: AutoBI integrates external tools and APIs, expanding its capabilities.
+ 
+Retrieval Augmented Generation: AutoBI augments your LLM's reasoning with your internal knowledge base.
+ 
+Human-In-The-Loop: For critical tasks, AutoBI enables human approval before query execution.
+ 
+Open Source Models: Use open-source LLM models like GPT, Gemini, and others.
+ 
+Easy Deployment: Deploy AutoBI with Docker for seamless and scalable operations.
+ 
+Multi-Tenancy: Manage and support multiple users and teams with ease.
+ 
+ 
+How to Get Started
+ 
+Generate Secret Keys
+ 
+You need to generate secret keys to secure your AutoBI instance. Run the following command to generate a secret key:
+ 
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+ 
+Copy and use the generated key for SECRET_KEY, POSTGRES_PASSWORD, etc. You can run the command multiple times to generate additional keys.
+ 
+Deploy AutoBI Locally with Docker
+ 
+To deploy AutoBI on your local machine using Docker, follow the local deployment guide.
+ 
+Deploy AutoBI on a Remote Server
+ 
+For deploying AutoBI on a remote server, refer to the remote deployment guide.
+ 
+Guides and Concepts
+ 
+Sequential vs Hierarchical Workflows
+ 
+AutoBI supports both sequential and hierarchical workflows for query execution. In a sequential workflow, queries are executed one after another. In a hierarchical workflow, complex queries are broken down and delegated to different agents or sub-teams for execution.
+ 
+Creating a Skill Using Skill Definitions
+ 
+You can create custom skills that allow agents to interact with external APIs, fetch data, or execute queries. Simply provide a skill definition in the 'Skills' tab and configure the parameters.
+ 
+Writing a Custom Skill using LangChain
+ 
+For more advanced capabilities, you can write custom skills using LangChain. Refer to the LangChain documentation for guidance.
+ 
+Retrieval Augmented Generation (RAG)
+ 
+RAG enables AutoBI to reason with additional private data uploaded into its knowledge base. You can select specific datasets for agents to reason with, making their responses more specialized.
+ 
+Customizing Embedding Models
+ 
+By default, AutoBI uses BAAI/bge-small-en-v1.5. You can customize the embedding model by editing the DENSE_EMBEDDING_MODEL in the environment configuration. Refer to the list of supported models.
+ 
+Contribution
+ 
+AutoBI is an open-source project, and we welcome contributions! To get started, check out our contribution guide.
+ 
+Some ways to contribute:
+ 
+Report bugs and issues
+ 
+Enhance our documentation
+ 
+Suggest or contribute new features
+ 
+ 
+License
+ 
+AutoBI is licensed under the MIT license. Check the license file for more details.
+ 
+ 
+---
+ 
+This README provides a clear and structured overview of the AutoBI project, similar to the VSwarm README, but tailored to your specific project. Let me know if you need further adjustments!
