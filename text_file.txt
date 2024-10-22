@@ -514,3 +514,37 @@ def update_organization(org_id: int, organization: OrganizationCreate, db: Sessi
     org.description = organization.description
     db.commit()
     return org
+
+
+
+
+
+
+
+
+
+
+
+models.py
+
+from sqlmodel import SQLModel, Field
+from typing import Optional
+
+# Define the Organization model
+class Organization(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True, index=True)
+    name: str = Field(max_length=100, nullable=False)
+    description: str = Field(max_length=500, nullable=False)
+
+# Define the User model
+class User(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True, index=True)
+    username: str = Field(max_length=50, unique=True, index=True, nullable=False)
+    hashed_password: str = Field(nullable=False)
+    is_superadmin: bool = Field(default=False)
+
+# Pydantic model for creating an organization
+class OrganizationCreate(SQLModel):
+    name: str
+    description: str
+
