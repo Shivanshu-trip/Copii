@@ -435,3 +435,26 @@ ERROR:    Error loading ASGI app. Could not import module "app".
 C:\Users\trish1u\Desktop\my>sqlite3 organizations.db
 'sqlite3' is not recognized as an internal or external command,
 operable program or batch file.
+
+
+
+
+import os
+from sqlmodel import SQLModel, Session, create_engine
+
+from models import Organization  # Assuming your models are defined in models.py
+
+# Database URL
+SQLALCHEMY_DATABASE_URL = "sqlite:///./organizations.db"
+print(f"Database path: {os.path.abspath('organizations.db')}")
+
+# Create engine
+engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+
+# Create the database tables if they don't exist
+SQLModel.metadata.create_all(engine)
+
+# Dependency for FastAPI routes
+def get_db():
+    with Session(engine) as session:
+        yield session
