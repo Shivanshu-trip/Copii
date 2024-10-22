@@ -414,3 +414,16 @@ def get_db():
     finally:
         db.close()
 
+
+
+
+
+
+
+
+
+C:\Users\trish1u\Desktop\my>uvicorn app:app --reload
+INFO:     Will watch for changes in these directories: ['C:\\Users\\trish1u\\Desktop\\my']
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [7200] using StatReload
+ERROR:    Error loading ASGI app. Could not import module "app".
