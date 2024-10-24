@@ -841,3 +841,64 @@ class Organization(SQLModel, table=True):
 class OrganizationCreate(SQLModel):
     name: str
     description: str
+
+
+
+
+
+
+
+organization.py
+from fastapi import FastAPI, HTTPException, Depends, APIRouter
+from sqlmodel import Session, select, SQLModel
+from app.models import *
+from app.api.deps import get_db
+
+
+router = APIRouter()
+
+# Ensure the database tables are created
+# print("Creating tables...")
+# SQLModel.metadata.create_all(bind=engine)
+# print("Tables created successfully!")
+
+
+@router.get("/organizations")
+def get_organizations(db: Session = Depends(get_db)):
+    statement = select(AdminOrgSettings)
+    results = db.exec(statement)
+    organizations = results.all()
+    return organizations
+
+@router.post("/organizations", status_code=201)
+def add_organization(organization: OrganizationCreate, db: Session = Depends(get_db)):
+    # new_org = admin_org_settings()
+    # statement = select(admin_org_settings).where(admin_org_settings.id==org_id).first()
+    new_org = AdminOrgSettings(name=organization.name, description=organization.description)
+    db.add(new_org)
+    db.commit()
+    db.refresh(new_org)
+    return new_org
+
+@router.delete("/organizations/{org_id}", status_code=204)
+def delete_organization(org_id: str, db: Session = Depends(get_db)):
+    statement = select(AdminOrgSettings).where(AdminOrgSettings.id == UUID(org_id))
+    results = db.exec(statement)
+    org = results.one_or_none()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    db.delete(org)
+    db.commit()
+    return {"detail": "Organization deleted successfully"}
+
+@router.put("/organizations/{org_id}", status_code=200)
+def update_organization(org_id: str, organization: OrganizationCreate, db: Session = Depends(get_db)):
+    statement = select(AdminOrgSettings).where(AdminOrgSettings.id == UUID(org_id))
+    results = db.exec(statement)
+    org = results.one_or_none()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    org.name = organization.name
+    org.description = organization.description
+    db.commit()
+    return org
