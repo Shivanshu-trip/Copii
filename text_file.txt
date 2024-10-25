@@ -1161,3 +1161,85 @@ class AdminLLMProviderSettingsRead(AdminLLMProviderSettingsBase):
 class OrganizationCreate(SQLModel):
     name: str = Field(max_length=50, unique=True, index=True, nullable=False)
     description: str
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Srili
+
+from app.api.deps import get_db
+from fastapi import APIRouter, HTTPException, Depends,Query
+from app.models import *
+from typing import List,Optional
+from sqlmodel import Session,select
+from sqlalchemy import or_,func
+from uuid import UUID, uuid4
+from rapidfuzz import fuzz
+
+
+router = APIRouter()
+
+@router.get("/workspace/search",response_model = List[Workspace])
+def search_anything(search_text:Optional[str] = None,
+                    visibility:Optional[str] = None,
+                    tags:Optional[List[str]] = Query(None),
+                    Organization:Optional[str]=None,
+                    session: Session = Depends(get_db),
+                    skip:int = 0,
+                    limit:int=10)-> List[Workspace]:
+    
+    query = select(Workspace).where(Workspace.is_active == True)
+    
+    if visibility:
+        if visibility.lower() == "public":
+            query = query.where(Workspace.is_public == True)
+        else:
+            query = query.where(Workspace.is_public == False)
+    if tags:
+        tag_conditions = [func.instr(Workspace.tags,tag) > 0 for tag in tags]
+        query = query.where(or_(*tag_conditions))
+            
+    if Organization:
+        
+        org_settings = session.exec(select(AdminOrgSettings).where(AdminOrgSettings.name == Organization))
+        org_id = org_settings.id
+        if isinstance(org_id,str):
+            try:
+                org_id = UUID(org_id)
+            except ValueError as e:
+                print(e)
+            
+        query = query.where(Workspace.organization_id == org_id)
+    
+    filtered_workspaces = session.exec(query).all()
+    
+    if search_text:
+        search_text = search_text.lower()
+        fuzzy_matches = []
+        for workspace in filtered_workspaces:
+            name_similarity = fuzz.ratio(search_text,workspace.name.lower())
+            description_similarity = fuzz.ratio(search_text,workspace.description.lower())
+            if name_similarity >= 80 or description_similarity >= 80:
+                fuzzy_matches.append(workspace)
+        
+        return fuzzy_matches
+        
+    return filtered_workspaces
