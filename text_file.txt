@@ -1243,3 +1243,317 @@ def search_anything(search_text:Optional[str] = None,
         return fuzzy_matches
         
     return filtered_workspaces
+
+
+
+
+
+
+
+
+
+
+organization.py
+
+from fastapi import FastAPI, HTTPException, Depends, APIRouter
+from fastapi.responses import JSONResponse
+from sqlmodel import Session, select, SQLModel
+from app.models import *
+from app.api.deps import get_db
+
+router = APIRouter()
+
+@router.get("/organizations")
+def get_organizations(db: Session = Depends(get_db)):
+    statement = select(AdminOrgSettings)
+    results = db.exec(statement)
+    organizations = results.all()
+    return organizations
+
+@router.post("/organizations", status_code=201)
+def add_organization(organization: OrganizationCreate, db: Session = Depends(get_db)):
+    # new_org = admin_org_settings()
+    # statement = select(admin_org_settings).where(admin_org_settings.id==org_id).first()
+    # new_org = AdminOrgSettings(name=organization.name, description=organization.description)
+    
+    statement= select(AdminOrgSettings).where(AdminOrgSettings.name == organization.name)
+    existing_org= db.exec(statement).first()
+    if existing_org:
+        # raise HTTPException(status_code=400, detail="Organization name already used")
+        return JSONResponse(status_code=200, content={"error": "Organization name already used"})
+    new_org = AdminOrgSettings(name=organization.name, description=organization.description)
+    db.add(new_org)
+    db.commit()
+    db.refresh(new_org)
+    return new_org
+
+@router.delete("/organizations/{org_id}", status_code=204)
+def delete_organization(org_id: str, db: Session = Depends(get_db)):
+    statement = select(AdminOrgSettings).where(AdminOrgSettings.id == UUID(org_id))
+    results = db.exec(statement)
+    org = results.one_or_none()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    db.delete(org)
+    db.commit()
+    return {"detail": "Organization deleted successfully"}
+
+@router.put("/organizations/{org_id}", status_code=200)
+def update_organization(org_id: str, organization: OrganizationCreate, db: Session = Depends(get_db)):
+    statement = select(AdminOrgSettings).where(AdminOrgSettings.id == UUID(org_id))
+    results = db.exec(statement)
+    org = results.one_or_none()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    org.name = organization.name
+    org.description = organization.description
+    db.commit()
+    return org
+
+
+models.py
+
+from datetime import datetime, timezone
+from typing import Optional
+from uuid import UUID, uuid4
+
+from sqlalchemy import JSON, Column
+from sqlmodel import Field, Relationship, SQLModel
+
+from sqlmodel import SQLModel, Field
+from typing import Optional
+
+
+
+class Token(SQLModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+# Association Table for User and Workspace with role and domains
+class UserWorkspaceLink(SQLModel, table=True):
+    __tablename__ = "user_workspace_link"
+    user_id: UUID = Field(foreign_key="user.id", primary_key=True)
+    workspace_id: UUID = Field(foreign_key="workspace.id", primary_key=True)
+    role: str  # Role can be 'workspace_admin', 'domain_admin', or 'api_user'
+    domains: list[UUID] = Field(
+        sa_column=Column(JSON)
+    )  # Placeholder for future domain relationship
+
+
+# Association Table for favorited workspaces
+class UserWorkspaceFavorited(SQLModel, table=True):
+    __tablename__ = "user_workspace_favorited"
+    user_id: UUID = Field(foreign_key="user.id", primary_key=True)
+    workspace_id: UUID = Field(foreign_key="workspace.id", primary_key=True)
+    favorited_date: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# User Base Model
+class UserBase(SQLModel):
+    full_name: str
+    username: str
+    email: str
+    functional_role: str  # Role like 'super_user' or 'application_user'
+    is_active: bool = True
+
+
+# User Table Model
+class User(UserBase, table=True):
+    __tablename__ = "user"
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    hashed_password: str
+    created: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_updated: datetime = datetime.now(timezone.utc)
+    is_first_login: bool = True
+
+    # Relationships
+    workspaces: list["Workspace"] = Relationship(
+        back_populates="users", link_model=UserWorkspaceLink
+    )
+    # Favorited workspaces
+    favorited_workspaces: list["Workspace"] = Relationship(
+        back_populates="favorited_by", link_model=UserWorkspaceFavorited
+    )
+
+
+# Pydantic Models for login
+class UserLogin(SQLModel):
+    username: str
+    password: str
+    domain: str | None = None
+    method: str
+
+
+# Pydantic Models for User
+class UserCreate(UserBase):
+    password: str
+
+
+class UserRead(UserBase):
+    id: UUID
+    created: datetime
+    last_updated: datetime 
+    is_first_login: bool
+
+
+# Workspace Base Model
+class WorkspaceBase(SQLModel):
+    description: str 
+    name: str
+    default_llm_provider: str
+    default_embedding_provider: str 
+    default_embedding_model: str 
+    default_llm_model: str 
+    is_public: bool = False
+
+
+# Workspace Table Model
+class Workspace(WorkspaceBase, table=True):
+    __tablename__ = "workspace"
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    organization_id: UUID = Field(foreign_key="admin_org_settings.id")
+    created_by_id: UUID = Field(foreign_key="user.id")
+    tags: list[str] = Field(sa_column=Column(JSON))  # Redefine 'tags' with sa_column
+
+    created_date: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_updated_date: datetime 
+
+    # Relationships
+    users: list["User"] = Relationship(
+        back_populates="workspaces", link_model=UserWorkspaceLink
+    )
+    favorited_by: list["User"] = Relationship(
+        back_populates="favorited_workspaces", link_model=UserWorkspaceFavorited
+    )
+
+class tag(SQLModel, table= True):
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    object_type: str =Field(nullable= False)
+    object_id: UUID = Field(default_factory=uuid4)
+    tag_name: str = Field(nullable=False)
+    created_date: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    # created_date: datetime= Field(default_factory=datetime.utcnow)
+
+    @validator("object_type")
+    def validate_object_type(cls,value):
+        allowed_types = {"workspace", "domain", "document"}
+        if value not in allowed_types:
+            raise ValueError(f"object_type must be one of {allowed_types}")
+        return value
+
+    # id: int = Field(default=None, primary_key=True)
+    # object_type: str =Field(nullable= False)
+    # object_id: int = Field(nullable=False)
+    # tag_name: str = Field(nullable=False)
+    # created_date: datetime= Field(default_factory=datetime.utcnow)
+
+# Pydantic Models for Workspace
+class WorkspaceCreate(WorkspaceBase):
+    tags: list[str] | None = None  # Include 'tags' here for input
+    organization_id: UUID 
+
+
+class WorkspaceRead(WorkspaceBase):
+    id: UUID
+    tags: list[str] | None = None  # Include 'tags' here for output
+    created_by_id: UUID 
+    created_date: datetime
+    last_updated_date: datetime 
+
+
+# AdminOrgSettings Base Model
+class AdminOrgSettingsBase(SQLModel):
+    name: str
+    description: str 
+
+
+# AdminOrgSettings Table Model
+class AdminOrgSettings(AdminOrgSettingsBase, table=True):
+    __tablename__ = "admin_org_settings"
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    # name: str = Field(index=True, unique=True)
+    # description: str
+
+
+# Pydantic Models for AdminOrgSettings
+class AdminOrgSettingsCreate(AdminOrgSettingsBase):
+    pass
+
+
+class AdminOrgSettingsRead(AdminOrgSettingsBase):
+    id: UUID
+
+
+# AdminLDAPSettings Base Model
+class AdminLDAPSettingsBase(SQLModel):
+    ldap_name: str
+    ldap_server: str
+    ldap_port: int
+    ldap_base_dn: str 
+    ldap_base_search: str 
+    ldap_ssl_enabled: bool = False
+
+
+# AdminLDAPSettings Table Model
+class AdminLDAPSettings(AdminLDAPSettingsBase, table=True):
+    __tablename__ = "admin_ldap_settings"
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+
+
+# Pydantic Models for AdminLDAPSettings
+class AdminLDAPSettingsCreate(AdminLDAPSettingsBase):
+    pass
+
+
+class AdminLDAPSettingsRead(AdminLDAPSettingsBase):
+    id: UUID
+
+
+# AdminLLMModelSettings Base Model
+class AdminLLMModelSettingsBase(SQLModel):
+    llm_model_name: str
+    llm_provider_id: UUID
+    llm_base_endpoint_url: str | None = None
+    llm_api_token: str
+
+
+# AdminLLMModelSettings Table Model
+class AdminLLMModelSettings(AdminLLMModelSettingsBase, table=True):
+    __tablename__ = "admin_llm_model_settings"
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+
+
+# Pydantic Models for AdminLLMModelSettings
+class AdminLLMModelSettingsCreate(AdminLLMModelSettingsBase):
+    pass
+
+
+class AdminLLMModelSettingsRead(AdminLLMModelSettingsBase):
+    id: UUID
+
+
+# AdminLLMProviderSettings Base Model
+class AdminLLMProviderSettingsBase(SQLModel):
+    llm_provider_name: str
+
+
+# AdminLLMProviderSettings Table Model
+class AdminLLMProviderSettings(AdminLLMProviderSettingsBase, table=True):
+    __tablename__ = "admin_llm_provider_settings"
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+
+
+# Pydantic Models for AdminLLMProviderSettings
+class AdminLLMProviderSettingsCreate(AdminLLMProviderSettingsBase):
+    pass
+
+
+class AdminLLMProviderSettingsRead(AdminLLMProviderSettingsBase):
+    id: UUID
+
+
+# Pydantic model for creating an organization
+class OrganizationCreate(SQLModel):
+    name: str
+    description: str
