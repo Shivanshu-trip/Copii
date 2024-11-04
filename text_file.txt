@@ -1610,3 +1610,65 @@ Traceback (most recent call last):
   File "C:\Users\trish1u\Desktop\autobi_real\backend\env\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 375, in load  
     raise exc.NoSuchModuleError(
 sqlalchemy.exc.NoSuchModuleError: Can't load plugin: sqlalchemy.dialects:driver
+
+
+
+
+
+
+
+
+Knowledge repo
+
+from fastapi import FastAPI, HTTPException, Depends
+from sqlmodel import Session, select
+from typing import List
+from datetime import datetime
+from uuid import UUID
+
+app = FastAPI()
+
+# Dependency to get the session
+def get_session():
+    with Session(engine) as session:
+        yield session
+
+@app.get("/documents/", response_model=List[KnowledgeRepository])
+def get_documents(tag: Optional[str] = None, status: Optional[DocumentStatus] = None, session: Session = Depends(get_session)):
+    query = select(KnowledgeRepository)
+    if tag:
+        query = query.where(KnowledgeRepository.tags.contains([tag]))
+    if status:
+        query = query.where(KnowledgeRepository.progress == status)
+    documents = session.exec(query).all()
+    return documents
+
+@app.post("/documents/", response_model=KnowledgeRepository)
+def create_document(document: KnowledgeRepository, session: Session = Depends(get_session)):
+    session.add(document)
+    session.commit()
+    session.refresh(document)
+    return document
+
+@app.put("/documents/{document_id}", response_model=KnowledgeRepository)
+def update_document(document_id: UUID, updated_doc: KnowledgeRepository, session: Session = Depends(get_session)):
+    document = session.get(KnowledgeRepository, document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    for key, value in updated_doc.dict(exclude_unset=True).items():
+        setattr(document, key, value)
+    document.last_modified = datetime.now(timezone.utc)  # Update modified timestamp
+    session.add(document)
+    session.commit()
+    session.refresh(document)
+    return document
+
+@app.delete("/documents/{document_id}", response_model=dict)
+def delete_document(document_id: UUID, session: Session = Depends(get_session)):
+    document = session.get(KnowledgeRepository, document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    document.progress = DocumentStatus.DELETED
+    session.add(document)
+    session.commit()
+    return {"message": "Document deleted"}
