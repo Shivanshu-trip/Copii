@@ -1715,3 +1715,664 @@ api_router.include_router(filter_workspace.router, tags=["filter"])
 
 
 app.include_router(api_router)
+
+
+
+
+
+
+
+
+models.py
+
+from datetime import datetime, timezone
+from typing import Optional,List
+from uuid import UUID, uuid4
+from enum import Enum
+from sqlalchemy import JSON, Column,UniqueConstraint
+from sqlmodel import Field, Relationship, SQLModel
+import enum
+
+class Token(SQLModel):
+    access_token: str
+    token_type: str = "bearer"
+
+   
+class Role(str, Enum):
+    WORKSPACE_ADMIN = "workspace_admin"
+    DOMAIN_STEWARD = "domain_admin"
+    API_USER = "api_user"
+    
+
+# Association Table for User and Workspace with role and domains
+class UserWorkspaceLink(SQLModel, table=True):
+    __tablename__ = "user_workspace_link"
+    user_id: UUID = Field(foreign_key="user.id", primary_key=True)
+    workspace_id: UUID = Field(foreign_key="workspace.id", primary_key=True)
+    role: Role  # Role can be 'workspace_admin', 'domain_admin', or 'api_user'
+    domain_mapping_id: UUID = Field(default_factory=uuid4, foreign_key="user_workspace_domain_link.user_workspace_id", index = True)
+
+
+# Association Table for favorited workspaces
+class UserWorkspaceFavorited(SQLModel, table=True):
+    __tablename__ = "user_workspace_favorited"
+    user_id: UUID = Field(foreign_key="user.id", primary_key=True)
+    workspace_id: UUID = Field(foreign_key="workspace.id", primary_key=True)
+    favorited_date: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# User Base Model
+class UserBase(SQLModel):
+    full_name: str
+    username: str
+    email: str
+    functional_role: str  # Role like 'super_user' or 'application_user'
+    is_active: bool = True
+    is_super_user: bool = False
+
+
+# User Table Model
+class User(UserBase, table=True):
+    __tablename__ = "user"
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    hashed_password: str
+    created: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_updated: datetime = datetime.now(timezone.utc)
+    is_first_login: bool = True
+
+    # Relationships
+    workspaces: list["Workspace"] = Relationship(
+        back_populates="users", link_model=UserWorkspaceLink
+    )
+    # Favorited workspaces
+    favorited_workspaces: list["Workspace"] = Relationship(
+        back_populates="favorited_by", link_model=UserWorkspaceFavorited
+    )
+
+    requests_raised: list["RequestAccess"] = Relationship(back_populates="user", sa_relationship_kwargs=dict(foreign_keys="[RequestAccess.user_id]"))
+
+
+
+# Pydantic Models for login
+class UserLogin(SQLModel):
+    username: str
+    password: str
+    vz_domain: str | None = None
+    method: str
+
+
+# Pydantic Models for User
+class UserCreate(UserBase):
+    password: str
+
+
+class UserRead(UserBase):
+    id: UUID
+    created: datetime
+    last_updated: datetime 
+    is_first_login: bool
+
+
+class Tag(SQLModel, table= True):
+    __tablename__ = "tag"
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    object_type: str =Field(nullable= False)
+    object_id: UUID = Field(nullable= False)
+    tag_name: str = Field(nullable=False)
+    created_date: datetime= Field(default_factory=datetime.utcnow)
+
+    __mapper_args__ = {
+        "polymorphic_on":"object_type"
+    }
+    
+
+# Workspace Base Model
+class WorkspaceBase(SQLModel):
+    description: str 
+    name: str
+    default_llm_provider: str
+    default_embedding_provider: str 
+    default_embedding_model: str 
+    default_llm_model: str 
+    is_public: bool = False
+    is_active : bool = True
+
+
+# Workspace Table Model
+class Workspace(WorkspaceBase, table=True):
+    __tablename__ = "workspace"
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    organization_id: UUID = Field(default_factory=uuid4,foreign_key="admin_org_settings.id")
+    created_by_id: UUID = Field(default_factory=uuid4, foreign_key="user.id")
+    created_date: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_updated_date: datetime = datetime.now(timezone.utc)
+    request_access: list["RequestAccess"] = Relationship(back_populates="workspace")
+
+    # Relationships
+    tags : list["Tag"] = Relationship(sa_relationship_kwargs=
+                                {"primaryjoin":"and_(Tag.object_id == Workspace.id, Tag.object_type == 'workspace')",
+                                 "foreign_keys":"Tag.object_id","viewonly":True})
+    
+    users: list["User"] = Relationship(back_populates="workspaces", link_model=UserWorkspaceLink
+    )
+    favorited_by: list["User"] = Relationship(back_populates="favorited_workspaces", link_model=UserWorkspaceFavorited
+    )
+
+    domains: list["Domain"] = Relationship(back_populates="workspace")
+
+    datasources: list["Datasource"] = Relationship(back_populates = "workspace")
+
+# Pydantic Models for Workspace
+class WorkspaceCreate(WorkspaceBase):
+    tags: list[str] | None = None  # Include 'tags' here for input
+    organization_id: UUID = Field(default_factory=uuid4) 
+    
+# Pydantic Models for creating a new Workspace
+class NewWorkspaceRead(WorkspaceCreate):
+    user_id: UUID = Field(default_factory=uuid4) 
+
+# AdminOrgSettings Base Model
+class AdminOrgSettingsBase(SQLModel):
+    name: str
+    description: str 
+
+
+# AdminOrgSettings Table Model
+class AdminOrgSettings(AdminOrgSettingsBase, table=True):
+    __tablename__ = "admin_org_settings"
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+
+
+# Pydantic Models for AdminOrgSettings
+class AdminOrgSettingsCreate(AdminOrgSettingsBase):
+    pass
+
+
+class AdminOrgSettingsRead(AdminOrgSettingsBase):
+    id: UUID
+
+
+# AdminLDAPSettings Base Model
+class AdminLDAPSettingsBase(SQLModel):
+    ldap_name: str = Field(index = True, unique = True)
+    ldap_server: str
+    ldap_port: int
+    ldap_base_dn: str
+    ldap_base_search: str
+    ldap_ssl_enabled: bool = False
+    ldap_bind_password: str
+    ldap_search_filter: str
+
+# AdminLDAPSettings Table Model
+class AdminLDAPSettings(AdminLDAPSettingsBase, table=True):
+    __tablename__ = "admin_ldap_settings"
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+
+
+# Pydantic Models for AdminLDAPSettings
+class AdminLDAPSettingsCreate(AdminLDAPSettingsBase):
+    pass
+
+
+class AdminLDAPSettingsRead(AdminLDAPSettingsBase):
+    id: UUID
+
+
+# AdminLLMProviderSettings Base Model
+class AdminLLMProviderSettingsBase(SQLModel):
+    llm_provider_name: str
+
+class AdminLLMProviderSettings(AdminLLMProviderSettingsBase, table=True):
+    __tablename__ = 'adminllmprovidersettings'
+    __table_args__ = (UniqueConstraint('llm_provider_name', name='uix_llm_provider_name'),)
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+
+class AdminLLMProviderSettingsCreate(AdminLLMProviderSettingsBase):
+    pass
+
+class AdminLLMProviderSettingsRead(AdminLLMProviderSettingsBase):
+    id: UUID
+
+class AdminLLMModelSettingsBase(SQLModel):
+    llm_model_name: str
+    provider_id: UUID = Field(foreign_key="adminllmprovidersettings.id")
+    llm_base_endpoint_url: Optional[str] = None
+    llm_api_token: Optional[str] = None
+
+class AdminLLMModelSettings(AdminLLMModelSettingsBase, table=True):
+    __tablename__ = 'adminllmmodelsettings'
+    __table_args__ = (
+        UniqueConstraint('llm_model_name', 'provider_id', name='uix_llm_model_provider'),
+    )
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+
+class AdminLLMModelSettingsCreate(AdminLLMModelSettingsBase):
+    pass
+
+class AdminLLMModelSettingsUpdate(SQLModel):
+    llm_base_endpoint_url: Optional[str] = None
+    llm_api_token: Optional[str] = None
+
+class AdminLLMModelSettingsRead(AdminLLMModelSettingsBase):
+    id: UUID
+
+class OrganizationCreate(SQLModel):
+    name: str = Field(max_length=50, unique=True, index=True, nullable=False)
+    description: str
+
+
+#SMTP Configuration
+class SMTPConfigurationBase(SQLModel):
+    smtp_server: str
+    smtp_port: int
+    smtp_username: str
+    smtp_password: Optional[str] = None
+    enable_tls: Optional[bool] = False
+    email_from: str
+
+class SMTPConfiguration(SMTPConfigurationBase, table=True):
+    __tablename__ = "smtp_configuration"
+    id: UUID = Field(default_factory=uuid4, primary_key = True)
+    certification_id: Optional[UUID] = Field(default=None, foreign_key="smtp_certificate.id")
+
+    certificate: Optional["SMTPCertificate"] = Relationship(back_populates="configuration")
+
+class SMTPConfigurationCreate(SMTPConfigurationBase):
+    certificate_id: Optional[UUID] = None
+
+class SMTPConfigurationUpdate(SQLModel):
+    smtp_server: Optional[str] = None
+    smtp_port: Optional[int] = None
+    smtp_username: Optional[str] = None
+    smtp_password: Optional[str] = None
+    enable_tls: Optional[bool] = None
+    email_from: Optional[str] = None
+    certificate_id: Optional[UUID] = None
+
+class SMTPCertificate(SQLModel, table=True):
+    __tablename__ = "smtp_certificate"
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    filename: str 
+    fileblob: bytes  
+    uploaded_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc)) 
+
+    configuration: Optional[SMTPConfiguration] = Relationship(back_populates="certificate")
+
+
+#Response Model for uploading SMTP certificate
+class SMTPCertificateOut(SQLModel):
+    id: UUID = Field(default_factory=uuid4)
+    filename: str 
+    uploaded_at: datetime 
+
+
+# Enum for Request Status
+class RequestStatus(str, Enum):
+    WAITING_APPROVAL = "WAITING_APPROVAL"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    REVOKED = "REVOKED"
+
+# Base Model (Shared Fields)
+class RequestAccessBase(SQLModel):
+    user_id: UUID = Field(foreign_key="user.id")
+    workspace_id: UUID = Field(foreign_key="workspace.id")
+    role: Role
+    reason: str = Field(nullable=False)
+    status: Optional[RequestStatus] = Field(default=RequestStatus.WAITING_APPROVAL)
+
+
+# RoleRequestCreate (For Creating New Requests)
+class RequestAccessCreate(RequestAccessBase):
+    domains: List[UUID]
+
+
+# RoleRequest Model (Database Table)
+class RequestAccess(RequestAccessBase, table=True):
+    __tablename__ = "request_access"
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    handled_by_user_id : Optional[UUID] = Field(default=None, foreign_key="user.id")
+    # Relationships
+    user: User = Relationship(sa_relationship_kwargs=dict(foreign_keys="[RequestAccess.user_id]"))
+    workspace: Workspace = Relationship(back_populates="request_access")
+    requested_domains: List["DomainRequestAccess"] = Relationship(back_populates="request_access", cascade_delete=True)
+    handled_by_user: Optional["User"] = Relationship(sa_relationship_kwargs=dict(foreign_keys = "[RequestAccess.handled_by_user_id]"))
+
+
+class DomainDatasourceLink(SQLModel, table = True):
+    __tablename__ = "domain_datasource_link"
+    domain_id: UUID = Field(foreign_key="domain.id",primary_key=True)
+    datasource_id: UUID = Field(foreign_key= "datasource.id",primary_key = True)
+    context_definition: str
+
+  
+class DatasourceBase(SQLModel):
+    name: str
+    technology_type: str
+    
+
+class Datasource(DatasourceBase,table = True):
+    __tablename__ = "datasource"
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    
+    workspace_id : UUID = Field(foreign_key = "workspace.id")
+    tags : list["Tag"] = Relationship(sa_relationship_kwargs=
+                                {"primaryjoin":"and_(Tag.object_id == Datasource.id, Tag.object_type == 'datasource')",
+                                 "foreign_keys":"Tag.object_id","viewonly":True})
+    
+    domains: list["Domain"] = Relationship(back_populates = "datasources",link_model = DomainDatasourceLink)
+    workspace: Workspace = Relationship(back_populates = "datasources")
+
+   
+class DomainBase(SQLModel):
+    name: str
+    description: str
+    technology_type: str
+
+class Domain(DomainBase, table = True):
+    __tablename__ = "domain"
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    workspace_id: UUID = Field(foreign_key = "workspace.id")
+    request_access: list["DomainRequestAccess"] = Relationship(back_populates="domains")
+    
+    workspace: Workspace = Relationship(back_populates = "domains")
+    tags : list["Tag"] = Relationship(sa_relationship_kwargs=
+                                {"primaryjoin":"and_(Tag.object_id == Domain.id, Tag.object_type == 'domain')",
+                                 "foreign_keys":"Tag.object_id","viewonly":True})
+    
+    datasources: list["Datasource"] = Relationship(back_populates = "domains", link_model = DomainDatasourceLink )
+    #TO-DO knowledge docs and prompts
+
+class DomainCreate(DomainBase):
+    workspace_id: UUID = Field(default_factory=uuid4)
+
+class DomainRequestAccess(SQLModel, table=True):
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    request_access_id: UUID = Field(foreign_key='request_access.id')
+    domain_id: UUID = Field(foreign_key='domain.id')
+    request_access: RequestAccess = Relationship(back_populates='requested_domains')
+    domains: Domain = Relationship(back_populates='request_access')
+
+class UserWorkspaceDomainLink(SQLModel, table=True):
+    __tablename__ = "user_workspace_domain_link"
+    user_workspace_id: UUID = Field(foreign_key="user_workspace_link.domain_mapping_id", primary_key=True)
+    domain_id: UUID = Field(foreign_key="domain.id", primary_key=True)
+
+
+class KnowledgeRepository(SQLModel, table =True):
+    __tablename__ = "knowledge_repository"
+    id: UUID = Field(default_factory=uuid4, primary_key= True)
+    name: str
+    description:Optional[str]=None
+    workspace_id: UUID = Field(foreign_key="workspace.id")
+    tags: list[str] = Field(sa_column= Column(JSON))
+    index_reference_id: Optional[UUID] =None
+    chunk_size: Optional[int] = None
+    chunk_overlap: Optional[int]= None
+    created_date: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_updated_date: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_by:Optional[UUID] = Field(foreign_key="user.id")
+    last_updated_by: Optional[UUID]= Field(foreign_key="user.id")
+#     tags : list["Tag"] = Relationship(sa_relationship_kwargs=
+#                             {"primaryjoin":"and_(Tag.object_id == KnowledgeRepository.id, Tag.object_type == 'knowledgerepo')",
+#                                  "foreign_keys":"Tag.object_id","viewonly":True})
+    
+
+    
+    workspaces: Optional["Workspace"] = Relationship(
+        back_populates="knowledge_repositories"
+    )
+
+# KnowledgeRepository.__mapper_args__ = {
+#     "polymorphic_identity": "knowledgerepo",
+#     "with_polymorphic":"*"
+# }
+
+
+class DocumentStatus(str, Enum):
+    IN_PROGRESS ="In Progress"
+    COMPLETED = "Completed"
+    FAILED = "Failed"
+    DELETED = "Deleted"
+
+Tag.__mapper_args__.update({
+    "polymorphic_identity": "tag",
+    "with_polymorphic":"*"
+})
+
+Workspace.__mapper_args__ = {
+    "polymorphic_identity": "workspace",
+    "with_polymorphic":"*"
+}
+
+Domain.__mapper_args__ = {
+    "polymorphic_identity": "domain",
+    "with_polymorphic":"*"
+}
+
+Datasource.__mapper_args__ = {
+    "polymorphic_identity": "datasource",
+    "with_polymorphic":"*"
+}
+
+
+
+
+knowledge_repo.py
+
+from fastapi import FastAPI, HTTPException, Depends, APIRouter
+from sqlmodel import Session, select, SQLModel, create_engine
+from typing import List
+from datetime import datetime
+from uuid import UUID
+from app.models import *
+from app.api.deps import *
+
+router = APIRouter()
+
+# engine = create_engine(DATABASE_URL, echo= True)
+# Dependency to get the session
+# def get_session():
+#     with Session(engine) as session:
+#         yield session
+
+@router.get("/documents/", response_model=List[KnowledgeRepository])
+def get_documents(tag: Optional[str] = None, status: Optional[DocumentStatus] = None, session: Session = Depends(get_db)):
+    query = select(KnowledgeRepository)
+    if tag:
+        query = query.where(KnowledgeRepository.tags.contains([tag]))
+    if status:
+        query = query.where(KnowledgeRepository.progress == status)
+    documents = session.exec(query).all()
+    return documents
+
+@router.post("/documents/", response_model=KnowledgeRepository)
+def create_document(document: KnowledgeRepository, session: Session = Depends(get_db)):
+    new_repo= KnowledgeRepository(name=document.name, 
+                                   description=document.description,
+                                    workspace_id=document.workspace_id,
+                                    tags= document.tags
+                                   )
+    session.add(new_repo)
+    session.commit()
+    session.refresh(new_repo)
+    return document
+
+@router.put("/documents/{document_id}", response_model=KnowledgeRepository)
+def update_document(document_id: UUID, updated_doc: KnowledgeRepository, session: Session = Depends(get_db)):
+    document = session.get(KnowledgeRepository, document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    for key, value in updated_doc.dict(exclude_unset=True).items():
+        setattr(document, key, value)
+    document.last_modified = datetime.now(timezone.utc)  # Update modified timestamp
+    session.add(document)
+    session.commit()
+    session.refresh(document)
+    return document
+
+@router.delete("/documents/{document_id}", response_model=dict)
+def delete_document(document_id: UUID, session: Session = Depends(get_db)):
+    document = session.get(KnowledgeRepository, document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    document.progress = DocumentStatus.DELETED
+    session.add(document)
+    session.commit()
+    return {"message": "Document deleted"}
+
+
+
+main.py
+
+from fastapi import APIRouter, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+import sys
+
+from app.api.routes import add_user, login,llm_config, organization, domain_request, role_request, smtp_handler,ldap_config, workspace, filter_workspace, knowledge_repo
+
+api_router = APIRouter()
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"]
+)
+
+api_router.include_router(login.router, tags=["login"])
+api_router.include_router(add_user.router, tags=["users"])
+api_router.include_router(llm_config.router,tags=["llmconfig"])
+api_router.include_router(organization.router,tags=["organization"])
+api_router.include_router(domain_request.router, tags=["domain"])
+api_router.include_router(smtp_handler.router, tags=["smtp configuration"])
+api_router.include_router(role_request.router, tags=["Role Change Request"])
+api_router.include_router(ldap_config.router, tags=["ldap"])
+api_router.include_router(workspace.router, tags=["homepage"])
+api_router.include_router(filter_workspace.router, tags=["filter"])
+api_router.include_router(knowledge_repo.router, tags=["knowledge"])
+
+
+app.include_router(api_router)
+
+
+
+
+
+error
+
+INFO:     127.0.0.1:59606 - "POST /documents/ HTTP/1.1" 500 Internal Server Error
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\sqlalchemy\orm\mapper.py", line 2520, in get_property
+    return self._props[key]
+           ~~~~~~~~~~~^^^^^
+KeyError: 'knowledge_repositories'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\uvicorn\protocols\http\httptools_impl.py", line 426, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 84, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\fastapi\applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\starlette\applications.py", line 123, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\starlette\middleware\errors.py", line 186, in __call__
+    raise exc
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\starlette\middleware\errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\starlette\middleware\cors.py", line 83, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\starlette\middleware\exceptions.py", line 62, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\starlette\_exception_handler.py", line 64, in wrapped_app
+    raise exc
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\starlette\routing.py", line 762, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\starlette\routing.py", line 782, in app     
+    await route.handle(scope, receive, send)
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\starlette\routing.py", line 297, in handle  
+    await self.app(scope, receive, send)
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\starlette\routing.py", line 77, in app      
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\starlette\_exception_handler.py", line 64, in wrapped_app
+    raise exc
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\starlette\routing.py", line 72, in app      
+    response = await func(request)
+               ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\fastapi\routing.py", line 285, in app       
+    raise e
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\fastapi\routing.py", line 275, in app       
+    solved_result = await solve_dependencies(
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\fastapi\dependencies\utils.py", line 626, in solve_dependencies
+    ) = await request_body_to_args(  # body_params checked above
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\fastapi\dependencies\utils.py", line 756, in request_body_to_args
+    v_, errors_ = field.validate(value, values, loc=loc)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\fastapi\_compat.py", line 125, in validate  
+    self._type_adapter.validate_python(value, from_attributes=True),
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\pydantic\type_adapter.py", line 208, in validate_python
+    return self.validator.validate_python(__object, strict=strict, from_attributes=from_attributes, context=context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<string>", line 4, in __init__
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\sqlalchemy\orm\state.py", line 566, in _initialize_instance
+    manager.dispatch.init(self, args, kwargs)
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\sqlalchemy\event\attr.py", line 497, in __call__
+    fn(*args, **kw)
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\sqlalchemy\orm\mapper.py", line 4407, in _event_on_init
+    instrumenting_mapper._check_configure()
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\sqlalchemy\orm\mapper.py", line 2399, in _check_configure
+    _configure_registries({self.registry}, cascade=True)
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\sqlalchemy\orm\mapper.py", line 4215, in _configure_registries
+    _do_configure_registries(registries, cascade)
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\sqlalchemy\orm\mapper.py", line 4256, in _do_configure_registries
+    mapper._post_configure_properties()
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\sqlalchemy\orm\mapper.py", line 2416, in _post_configure_properties
+    prop.init()
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\sqlalchemy\orm\interfaces.py", line 589, in init
+    self.do_init()
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\sqlalchemy\orm\relationships.py", line 1647, in do_init
+    self._generate_backref()
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\sqlalchemy\orm\relationships.py", line 2133, in _generate_backref
+    self._add_reverse_property(self.back_populates)
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\sqlalchemy\orm\relationships.py", line 1578, in _add_reverse_property
+    other = self.mapper.get_property(key, _configure_mappers=False)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\sqlalchemy\orm\mapper.py", line 2522, in get_property
+    raise sa_exc.InvalidRequestError(
+sqlalchemy.exc.InvalidRequestError: Mapper 'Mapper[Workspace(workspace)]' has no property 'knowledge_repositories'.  If this property was indicated from other mappers or configure events, ensure registry.configure() has been called.
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\sqlalchemy\orm\mapper.py", line 2522, in get_property
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\sqlalchemy\orm\mapper.py", line 2522, in get_property
+    raise sa_exc.InvalidRequestError(
+sqlalchemy.exc.InvalidRequestError: Mapper 'Mapper[Workspace(workspace)]' has no property 'knowledge_repositories'.  If this property was indicated from other mappers or configure events, ensure registry.configure() has been called.
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\sqlalchemy\orm\mapper.py", line 2522, in get_property
+    raise sa_exc.InvalidRequestError(
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\sqlalchemy\orm\mapper.py", line 2522, in get            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\sqlalchemy\orm\mapper.py", line 2522, in get_property
+    raise sa_exc.InvalidRequestError(
+sqlalchemy.exc.InvalidRequestError: Mapper 'Mapper[Workspace(workspace)]' has no property 'knowledge_repositories'.  If this property was indicated from other mappers or configure events, ensure registry.configure() has been called.
