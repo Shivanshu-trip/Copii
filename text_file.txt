@@ -1672,3 +1672,46 @@ def delete_document(document_id: UUID, session: Session = Depends(get_session)):
     session.add(document)
     session.commit()
     return {"message": "Document deleted"}
+
+
+
+
+
+
+
+
+
+
+main.py
+
+from fastapi import APIRouter, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+import sys
+
+from app.api.routes import add_user, login,llm_config, organization, domain_request, role_request, smtp_handler,ldap_config, workspace, filter_workspace
+
+api_router = APIRouter()
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"]
+)
+
+api_router.include_router(login.router, tags=["login"])
+api_router.include_router(add_user.router, tags=["users"])
+api_router.include_router(llm_config.router,tags=["llmconfig"])
+api_router.include_router(organization.router,tags=["organization"])
+api_router.include_router(domain_request.router, tags=["domain"])
+api_router.include_router(smtp_handler.router, tags=["smtp configuration"])
+api_router.include_router(role_request.router, tags=["Role Change Request"])
+api_router.include_router(ldap_config.router, tags=["ldap"])
+api_router.include_router(workspace.router, tags=["homepage"])
+api_router.include_router(filter_workspace.router, tags=["filter"])
+# api.router.include_router(knowledge.router, tags=["knowledge"])
+
+
+app.include_router(api_router)
