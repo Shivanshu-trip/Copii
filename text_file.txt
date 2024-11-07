@@ -2459,3 +2459,86 @@ def query_database(key):
     # This function should actually fetch data from the database
     return f"Data for {key}"
 
+
+
+
+
+
+import redis
+import json
+
+# Initialize Redis connection
+redis_client = redis.StrictRedis(host='localhost', port=6379, db=0)
+
+# Function to cache data in Redis
+def cache_data(api_key, user_id, domain_ids, workspace_id, expiration=3600):
+    # Create the data dictionary
+    data = {
+        "user_id": user_id,
+        "domain_id": domain_ids,
+        "workspace_id": workspace_id
+    }
+    # Convert data to JSON string
+    json_data = json.dumps(data)
+    # Store in Redis with expiration
+    redis_client.setex(api_key, expiration, json_data)
+    print(f"Data cached for api_key: {api_key}")
+
+# Function to retrieve data from Redis
+def get_cached_data(api_key):
+    # Get data from Redis
+    cached_data = redis_client.get(api_key)
+    
+    if cached_data:
+        # Convert JSON string back to dictionary
+        data = json.loads(cached_data)
+        print(f"Data retrieved from cache for api_key: {api_key}")
+        return data
+    else:
+        print("Data not found in cache")
+        return None
+
+# Function to update cached data in Redis
+def update_cached_data(api_key, user_id=None, new_domain_id=None, workspace_id=None):
+    # Retrieve current data
+    data = get_cached_data(api_key)
+    if data:
+        # Update fields if new values are provided
+        if user_id is not None:
+            data["user_id"] = user_id
+        if new_domain_id is not None:
+            # Append new domain_id if provided
+            data["domain_id"].append(new_domain_id)
+        if workspace_id is not None:
+            data["workspace_id"] = workspace_id
+
+        # Convert updated data back to JSON and store in Redis
+        redis_client.setex(api_key, 3600, json.dumps(data))
+        print(f"Data updated in cache for api_key: {api_key}")
+    else:
+        print("Cannot update data - key not found in cache")
+
+# Function to delete cached data from Redis
+def delete_cached_data(api_key):
+    # Delete the cached entry
+    redis_client.delete(api_key)
+    print(f"Data deleted from cache for api_key: {api_key}")
+
+# Usage examples
+
+# Cache some data
+cache_data("your_api_key", "12345", ["domain1", "domain2"], "workspace1")
+
+# Retrieve cached data
+data = get_cached_data("your_api_key")
+print(data)
+
+# Update cached data
+update_cached_data("your_api_key", new_domain_id="domain3")
+
+# Retrieve updated data to check if the update was successful
+updated_data = get_cached_data("your_api_key")
+print(updated_data)
+
+# Delete cached data
+delete_cached_data("your_api_key")
