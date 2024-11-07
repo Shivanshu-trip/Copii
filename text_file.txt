@@ -2376,3 +2376,86 @@ sqlalchemy.exc.InvalidRequestError: Mapper 'Mapper[Workspace(workspace)]' has no
   File "C:\Users\trish1u\Desktop\autobi_kr\backend\autobi_venv\Lib\site-packages\sqlalchemy\orm\mapper.py", line 2522, in get_property
     raise sa_exc.InvalidRequestError(
 sqlalchemy.exc.InvalidRequestError: Mapper 'Mapper[Workspace(workspace)]' has no property 'knowledge_repositories'.  If this property was indicated from other mappers or configure events, ensure registry.configure() has been called.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+redis\
+
+import redis
+
+redis_client = redis.StrictRedis(host='localhost', port=6379, db=0)
+
+
+
+def get_data_from_cache(key):
+    # Check if data is in Redis cache
+    cached_data = redis_client.get(key)
+    if cached_data:
+        return cached_data
+    
+    # If not in cache, query the database
+    data = query_database(key)
+    
+    # Store the data in cache with an expiration time
+    redis_client.setex(key, 3600, data)  # Cache for 1 hour
+    return data
+
+
+def update_data_in_db_and_cache(key, new_data):
+    # Update the database
+    update_database(key, new_data)
+    
+    # Update the cache
+    redis_client.setex(key, 3600, new_data)
+
+
+
+import redis
+
+# Initialize Redis client
+redis_client = redis.StrictRedis(host='localhost', port=6379, db=0)
+
+def get_data(key):
+    # Check Redis cache
+    cached_data = redis_client.get(key)
+    if cached_data:
+        return cached_data
+    
+    # If data is not in cache, query database (simulate with a function call)
+    data = query_database(key)
+    
+    # Cache the data with an expiration time of 1 hour
+    redis_client.setex(key, 3600, data)
+    
+    return data
+
+def query_database(key):
+    # Simulate a database query
+    # This function should actually fetch data from the database
+    return f"Data for {key}"
+
