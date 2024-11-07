@@ -2542,3 +2542,83 @@ print(updated_data)
 
 # Delete cached data
 delete_cached_data("your_api_key")
+
+
+
+
+
+
+
+
+
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+import redis
+import json
+
+# Initialize Redis connection
+redis_client = redis.StrictRedis(host='localhost', port=6379, db=0)
+
+# Initialize FastAPI app
+app = FastAPI()
+
+# Data model for input data
+class CacheData(BaseModel):
+    api_key: str
+    user_id: str
+    domain_id: list[str]
+    workspace_id: str
+
+# Endpoint to cache data
+@app.post("/cache/")
+async def cache_data(data: CacheData):
+    # Convert data to JSON
+    json_data = json.dumps(data.dict())
+    # Store in Redis with expiration (1 hour)
+    redis_client.setex(data.api_key, 3600, json_data)
+    return {"message": "Data cached successfully", "api_key": data.api_key}
+
+# Endpoint to retrieve cached data
+@app.get("/cache/{api_key}")
+async def get_cached_data(api_key: str):
+    # Retrieve data from Redis
+    cached_data = redis_client.get(api_key)
+    if cached_data:
+        data = json.loads(cached_data)
+        return {"data": data}
+    else:
+        raise HTTPException(status_code=404, detail="Data not found in cache")
+
+# Endpoint to update cached data
+@app.put("/cache/{api_key}")
+async def update_cached_data(api_key: str, user_id: str = None, new_domain_id: str = None, workspace_id: str = None):
+    # Retrieve current data
+    cached_data = redis_client.get(api_key)
+    if not cached_data:
+        raise HTTPException(status_code=404, detail="Data not found in cache")
+
+    data = json.loads(cached_data)
+
+    # Update fields if new values are provided
+    if user_id is not None:
+        data["user_id"] = user_id
+    if new_domain_id is not None:
+        data["domain_id"].append(new_domain_id)
+    if workspace_id is not None:
+        data["workspace_id"] = workspace_id
+
+    # Save updated data back to Redis
+    redis_client.setex(api_key, 3600, json.dumps(data))
+    return {"message": "Data updated successfully", "api_key": api_key}
+
+# Endpoint to delete cached data
+@app.delete("/cache/{api_key}")
+async def delete_cached_data(api_key: str):
+    # Delete the cached entry
+    result = redis_client.delete(api_key)
+    if result == 1:
+        return {"message": "Data deleted successfully", "api_key": api_key}
+    else:
+        raise HTTPException(status_code=404, detail="Data not found in cache")
+
