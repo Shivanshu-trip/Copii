@@ -2701,3 +2701,188 @@ nnection
     connection.connect()
   File "C:\Users\trish1u\AppData\Local\Programs\Python\Python312\Lib\site-packages\redis\connection.py", line 363, in connect    raise ConnectionError(self._error_message(e))
 redis.exceptions.ConnectionError: Error 10061 connecting to localhost:6379. No connection could be made because the target machine actively refused it.
+
+
+
+
+
+
+
+
+
+
+
+
+
+rediss
+
+from fastapi import APIRouter, Depends,HTTPException,status
+from sqlmodel import select
+from app.models import (
+    UserWorkspaceLink,APIKeyDomainLink,
+    UserWorkspaceDomainLink,APIKey,Role,Domain,APIKeyUpdate,APIKeyCreate
+)
+import secrets
+from datetime import datetime,timedelta,timezone
+from app.api.deps import SessionDep,get_current_user
+from uuid import UUID
+router=APIRouter()
+
+@router.post("/api_keys/")
+def create_api_key_endpoint(
+    api_key_create:APIKeyCreate,
+    session:SessionDep,
+    # current_user:User=Depends(get_current_user)
+):
+    user_workspace_mapping=session.exec(
+        select(UserWorkspaceLink)
+        .where(UserWorkspaceLink.user_id==api_key_create.user_id)
+        .where(UserWorkspaceLink.workspace_id==api_key_create.workspace_id)
+        .where(UserWorkspaceLink.role==Role.API_USER)
+    ).first()
+
+    if not user_workspace_mapping:
+        raise HTTPException(status_code=403,detail="User does not have access to the workspace")
+    
+    # finding all the domains the user needs
+
+    domains=session.exec(
+        select(Domain)
+        .where(Domain.id.in_(api_key_create.domain_ids))
+    ).all()
+
+    #checking if any domain is missing or not 
+
+    if not domains or len(domains)!=len(api_key_create.domain_ids):
+        raise HTTPException(status_code=400, detail="Invalid domain id's provided")
+
+    available_domains=session.exec(
+        select(Domain)
+        .join(UserWorkspaceDomainLink,UserWorkspaceDomainLink.domain_id==Domain.id)
+        .where(UserWorkspaceDomainLink.user_workspace_id==user_workspace_mapping.domain_mapping_id)
+        .where(Domain.id.in_(api_key_create.domain_ids))
+    ).all()
+
+    if len(available_domains)!=len(api_key_create.domain_ids):
+        raise HTTPException(status_code=403, detail="One or more domains are not available for the user in the workspace")
+    
+    #checking the api keys already exist for given domains,workspace and user
+    existing_api_keys=session.exec(
+        select(APIKey)
+        .where(APIKey.user_id==api_key_create.user_id)
+        .where(APIKey.workspace_id==api_key_create.workspace_id)
+    ).all()
+
+    for existing_api_key in existing_api_keys:
+        existing_domain_ids={domain.id for domain in existing_api_key.domain}
+        if set(api_key_create.domain_ids)==existing_domain_ids:
+            raise HTTPException(status_code=400, detail="API key with the same domains already exists")
+    
+    #after validating create and append apikey to db
+    key=secrets.token_urlsafe(32)
+
+    api_key_append=APIKey(
+        api_key=key,
+        description=api_key_create.description,
+        user_id=api_key_create.user_id,
+        workspace_id=api_key_create.workspace_id,
+        created_at=datetime.now(timezone.utc),
+        modified_at=datetime.now(timezone.utc),
+        email_notification=False,
+        exp_date=datetime.now(timezone.utc)+timedelta(days=365)
+    )
+
+    session.add(api_key_append)
+    session.commit()
+    session.refresh(api_key_append)
+    
+    for domains in available_domains:
+        data=APIKeyDomainLink(api_key_id=api_key_append.id,domain_id=domains.id)
+        session.add(data)
+        session.commit()
+        session.refresh(data)
+
+    return {"status_code":201,"message":"success","data":api_key_append}
+
+@router.get("/api_key/")
+def get_api_key_endpoint(
+    session:SessionDep,
+    # current_user:User=Depends(get_current_user)
+):
+    response=[]
+
+    api_keys=session.exec(select(APIKey)).all()
+    for api_key in api_keys:
+        response.append({
+            "description":api_key.description,
+            "api_key":api_key.api_key,
+            "domain":[session.exec(
+        select(Domain.name)
+        .join(APIKeyDomainLink,APIKeyDomainLink.domain_id==Domain.id).where(APIKeyDomainLink.api_key_id==api_key.id)
+    ).all()],
+    "id":api_key.id
+        })
+    
+    return {"status_code":200,"message":"success","data":response}
+
+@router.put('/api_key/')
+def update_api_key_endpoint(api_key_id:UUID,user_id:UUID,api_key_update:APIKeyUpdate,session:SessionDep):
+    api_key=session.exec(
+        select(APIKey)
+        .where(APIKey.user_id==user_id).where(APIKey.id==api_key_id)
+    ).first()
+    if not api_key:
+        raise HTTPException(status_code=404,detail="API key not found")
+    if api_key.user_id!=user_id:
+        raise HTTPException(status_code=403,detail="You dont have permisions to update this key")
+    if api_key_update.description is not None:
+        api_key.description=api_key_update.description
+
+    if api_key_update.domain_ids is not None:
+        user_workspace_mapping=session.exec(
+            select(UserWorkspaceLink)
+            .where(UserWorkspaceLink.user_id==user_id)
+            .where(UserWorkspaceLink.workspace_id==api_key.workspace_id)
+            .where(UserWorkspaceLink.role==Role.API_USER)
+            ).first()
+        if not user_workspace_mapping:
+            raise HTTPException(status_code=403,detail="User does not have access to workspace")
+        available_domains=session.exec(
+            select(Domain)
+            .join(UserWorkspaceDomainLink,UserWorkspaceDomainLink.domain_id==Domain.id)
+            .where(UserWorkspaceDomainLink.user_workspace_id==user_workspace_mapping.domain_mapping_id)
+            .where(Domain.id.in_(api_key_update.domain_ids))
+        ).all()
+
+        if len(available_domains)!=len(api_key_update.domain_ids):
+            raise HTTPException(status_code=403, detail="One or more domains are not available for the user in the workspace")
+        existing_api_keys=session.exec(
+        select(APIKey)
+        .where(APIKey.user_id==user_id)
+        .where(APIKey.workspace_id==api_key.workspace_id).where(APIKey.id!=api_key.id)
+            ).all()
+        for existing_api_key in existing_api_keys:
+            existing_domain_ids={d.id for d in existing_api_key.domain}
+            if set(api_key.domain)==existing_domain_ids:
+                raise HTTPException(status_code=400, detail="API key with the same domains already exists")
+        api_key.domain=available_domains
+        api_key.modified_at=datetime.now(timezone.utc)
+        session.add(api_key)
+        session.commit()
+        session.refresh(api_key)
+        
+        return {"status_code":200,"message":"success","data":api_key}
+
+@router.delete('/api_key/',status_code=status.HTTP_204_NO_CONTENT)
+def delete_api_key_endpoint(
+    api_key_id:UUID,
+    session:SessionDep
+):
+    api_key=session.get(APIKey,api_key_id)
+    if not api_key:
+        raise HTTPException(status_code=404, detail="API key not found")
+    if api_key.user_id!=api_key_id:
+        raise HTTPException(status_code=403, detail="You dont have permissions to delete this API key")
+    
+    session.delete(api_key)
+    session .commit()
