@@ -3058,3 +3058,62 @@ At line:1 char:1
 + ~~~~~~~~~~~~
     + CategoryInfo          : ObjectNotFound: (redis-server:String) [], CommandNotFoundException
     + FullyQualifiedErrorId : CommandNotFoundException
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import requests
+
+# Replace with your Upstash Redis REST URL and Token
+UPSTASH_REDIS_REST_URL = "https://pet-amoeba-25520.upstash.io"  # Example URL; replace with yours
+UPSTASH_REDIS_REST_TOKEN = "AWO...MA"  # Replace with your actual token
+
+# Set up headers with the authorization token
+headers = {
+    "Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}",
+    "Content-Type": "application/json"
+}
+
+# Function to set a key-value pair in Redis
+def set_key(key, value):
+    url = f"{UPSTASH_REDIS_REST_URL}/set/{key}/{value}"
+    response = requests.get(url, headers=headers)
+    return response.json()  # Returns JSON response from Upstash
+
+# Function to get a value by key from Redis
+def get_key(key):
+    url = f"{UPSTASH_REDIS_REST_URL}/get/{key}"
+    response = requests.get(url, headers=headers)
+    return response.json()  # Returns JSON response from Upstash
+
+# Example usage
+try:
+    # Set a key-value pair
+    set_response = set_key("foo", "bar")
+    print("Set response:", set_response)
+
+    # Get the value of the key
+    get_response = get_key("foo")
+    print("Get response:", get_response)
+
+except requests.exceptions.RequestException as e:
+    print("An error occurred:", e)
