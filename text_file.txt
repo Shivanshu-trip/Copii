@@ -2886,3 +2886,145 @@ def delete_api_key_endpoint(
     
     session.delete(api_key)
     session .commit()
+
+
+
+
+
+
+import redis
+import json
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlmodel import select
+from app.models import (
+    UserWorkspaceLink, APIKeyDomainLink, 
+    UserWorkspaceDomainLink, APIKey, Role, Domain, APIKeyUpdate, APIKeyCreate
+)
+import secrets
+from datetime import datetime, timedelta, timezone
+from app.api.deps import SessionDep, get_current_user
+from uuid import UUID
+
+# Configure Redis client
+redis_client = redis.Redis(host='localhost', port=6379, db=0)
+
+router = APIRouter()
+
+def cache_api_key(api_key, user_id, domain_ids, workspace_id):
+    # Convert domain_ids list to a JSON serializable format
+    cache_data = {
+        "user_id": str(user_id),
+        "domain_ids": [str(domain) for domain in domain_ids],
+        "workspace_id": str(workspace_id)
+    }
+    redis_client.set(api_key, json.dumps(cache_data))
+
+@router.post("/api_keys/")
+def create_api_key_endpoint(
+    api_key_create: APIKeyCreate,
+    session: SessionDep,
+):
+    # Check for user-workspace mapping
+    user_workspace_mapping = session.exec(
+        select(UserWorkspaceLink)
+        .where(UserWorkspaceLink.user_id == api_key_create.user_id)
+        .where(UserWorkspaceLink.workspace_id == api_key_create.workspace_id)
+        .where(UserWorkspaceLink.role == Role.API_USER)
+    ).first()
+
+    if not user_workspace_mapping:
+        raise HTTPException(status_code=403, detail="User does not have access to the workspace")
+    
+    # Check and validate domains
+    domains = session.exec(
+        select(Domain)
+        .where(Domain.id.in_(api_key_create.domain_ids))
+    ).all()
+    if not domains or len(domains) != len(api_key_create.domain_ids):
+        raise HTTPException(status_code=400, detail="Invalid domain id's provided")
+
+    available_domains = session.exec(
+        select(Domain)
+        .join(UserWorkspaceDomainLink, UserWorkspaceDomainLink.domain_id == Domain.id)
+        .where(UserWorkspaceDomainLink.user_workspace_id == user_workspace_mapping.domain_mapping_id)
+        .where(Domain.id.in_(api_key_create.domain_ids))
+    ).all()
+
+    if len(available_domains) != len(api_key_create.domain_ids):
+        raise HTTPException(status_code=403, detail="One or more domains are not available for the user in the workspace")
+    
+    # Check for existing API keys
+    existing_api_keys = session.exec(
+        select(APIKey)
+        .where(APIKey.user_id == api_key_create.user_id)
+        .where(APIKey.workspace_id == api_key_create.workspace_id)
+    ).all()
+
+    for existing_api_key in existing_api_keys:
+        existing_domain_ids = {domain.id for domain in existing_api_key.domain}
+        if set(api_key_create.domain_ids) == existing_domain_ids:
+            raise HTTPException(status_code=400, detail="API key with the same domains already exists")
+
+    # Generate API key and save to DB
+    key = secrets.token_urlsafe(32)
+    api_key_append = APIKey(
+        api_key=key,
+        description=api_key_create.description,
+        user_id=api_key_create.user_id,
+        workspace_id=api_key_create.workspace_id,
+        created_at=datetime.now(timezone.utc),
+        modified_at=datetime.now(timezone.utc),
+        email_notification=False,
+        exp_date=datetime.now(timezone.utc) + timedelta(days=365)
+    )
+
+    session.add(api_key_append)
+    session.commit()
+    session.refresh(api_key_append)
+    
+    for domain in available_domains:
+        data = APIKeyDomainLink(api_key_id=api_key_append.id, domain_id=domain.id)
+        session.add(data)
+        session.commit()
+        session.refresh(data)
+
+    # Cache the new API key
+    cache_api_key(api_key=key, user_id=api_key_create.user_id, domain_ids=api_key_create.domain_ids, workspace_id=api_key_create.workspace_id)
+
+    return {"status_code": 201, "message": "success", "data": api_key_append}
+
+@router.get("/api_key/")
+def get_api_key_endpoint(session: SessionDep):
+    response = []
+
+    api_keys = session.exec(select(APIKey)).all()
+    for api_key in api_keys:
+        cached_data = redis_client.get(api_key.api_key)
+        
+        # Check Redis cache
+        if cached_data:
+            # If cached, use the cached data
+            data = json.loads(cached_data)
+        else:
+            # If not cached, query the database and cache the result
+            domain_names = session.exec(
+                select(Domain.name)
+                .join(APIKeyDomainLink, APIKeyDomainLink.domain_id == Domain.id)
+                .where(APIKeyDomainLink.api_key_id == api_key.id)
+            ).all()
+            
+            data = {
+                "user_id": api_key.user_id,
+                "workspace_id": api_key.workspace_id,
+                "domain_ids": [domain.id for domain in api_key.domain]
+            }
+            cache_api_key(api_key.api_key, data["user_id"], data["domain_ids"], data["workspace_id"])
+
+        response.append({
+            "description": api_key.description,
+            "api_key": api_key.api_key,
+            "domains": data["domain_ids"],
+            "id": api_key.id
+        })
+    
+    return {"status_code": 200, "message": "success", "data": response}
