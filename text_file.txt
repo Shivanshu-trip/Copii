@@ -3028,3 +3028,33 @@ def get_api_key_endpoint(session: SessionDep):
         })
     
     return {"status_code": 200, "message": "success", "data": response}
+
+
+
+
+
+
+
+
+
+
+import redis
+import json
+redis_client = redis.Redis(
+    host= 'localhost',
+    username= "user",
+    password= "admin",
+    port=6380, db= 0
+)
+
+redis_client.set("Hello World", "userr")
+
+
+redis-server : The term 'redis-server' is not recognized as the name of a cmdlet, function, script file, or 
+operable program. Check the spelling of the name, or if a path was included, verify that the path is 
+correct and try again.
+At line:1 char:1
++ redis-server
++ ~~~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (redis-server:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
