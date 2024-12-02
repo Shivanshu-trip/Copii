@@ -3706,4 +3706,66 @@ class APIKeyCaching(SQLModel):
     domain_ids:List[UUID]
     api_key:str
     description:str
+
+
+
+
+
+
+
+
+
+from fastapi import FastAPI, BackgroundTasks
+from pydantic import BaseModel
+from enum import Enum
+import time
+
+app = FastAPI()
+
+# Enum to represent the status
+class ValidationStatus(str, Enum):
+    valid = "Valid"
+    invalid = "Invalid"
+    in_progress = "In-Progress"
+
+# Model to store knowledge base status
+class KnowledgeBase(BaseModel):
+    status: ValidationStatus = ValidationStatus.valid
+
+knowledge_base = KnowledgeBase()
+
+# Simulate a validation process
+def validate_knowledge_base():
+    time.sleep(5)  # Simulating a long-running validation process
+    # Randomly set the status to valid or invalid
+    from random import choice
+    knowledge_base.status = choice([ValidationStatus.valid, ValidationStatus.invalid])
+
+@app.get("/knowledge_base/status", response_model=KnowledgeBase)
+def get_status():
+    """
+    Endpoint to get the current status of the knowledge base validation.
+    """
+    return knowledge_base
+
+@app.post("/knowledge_base/refresh")
+def refresh_knowledge_base(background_tasks: BackgroundTasks):
+    """
+    Endpoint to refresh the knowledge base validation.
+    - Sets the status to 'In-Progress'.
+    - Disables the refresh button by not allowing concurrent refresh requests.
+    """
+    if knowledge_base.status == ValidationStatus.in_progress:
+        return {"message": "Validation already in progress. Please wait."}
+
+    # Set status to In-Progress
+    knowledge_base.status = ValidationStatus.in_progress
+
+    # Start the validation process in the background
+    background_tasks.add_task(validate_knowledge_base)
+    return {"message": "Knowledge base validation started."}
+
+
+
+
     
