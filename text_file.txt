@@ -3768,4 +3768,164 @@ def refresh_knowledge_base(background_tasks: BackgroundTasks):
 
 
 
+
+
+
+
+
+
+from fastapi import APIRouter, Depends, Path, Query, HTTPException, FastAPI
+from uuid import UUID
+from typing import List, Optional
+from sqlmodel import Session
+from app.db import get_db
+
+from app.crud.datasource import (
+    soft_delete_datasource,
+    search_tags,
+    get_db_types,
+    get_connection_names,
+    search_datasources,
+    refresh_metadata,
+    update_metadata
+)
+
+router = APIRouter()
+# router = FastAPI()
+
+@router.put("/workspace/{workspace_id}/datasource/{datasource_id}/delete")
+def soft_delete_workspace(workspace_id: UUID, datasource_id: UUID, db: Session = Depends(get_db)):
+    success = soft_delete_datasource(db, datasource_id)
+    if success:
+        return {
+            "status_code": 200,
+            "message": "success",
+            "data": str(datasource_id)
+        }
+    else:
+        return {
+            "status_code": 404,
+            "message": "Datasource not found"
+        }
+
+
+@router.get("/workspace/{workspace_id}/datasource/tag/search")
+def search_tags_endpoint(workspace_id: UUID,
+                         search_text: Optional[str] = Query(None),
+                         db: Session = Depends(get_db)):
+    tags = search_tags(db, workspace_id, search_text)
+    return {
+        "status_code": 200,
+        "message": "success",
+        "data": tags
+    }
+
+
+@router.get("/workspace/{workspace_id}/datasource/db_types")
+def get_db_types_endpoint(workspace_id: UUID, db: Session = Depends(get_db)):
+    db_types = get_db_types(db, workspace_id)
+    # Format as required: [{"db_type": name, "db_id": id}, ...]
+    data = [{"db_type": name, "db_id": id_} for (name, id_) in db_types]
+    return {
+        "status_code": 200,
+        "message": "success",
+        "data": data
+    }
+
+
+@router.get("/workspace/{workspace_id}/datasource/{database_id}/connection_name")
+async def get_connection_name_endpoint(
+    workspace_id: UUID = Path(...),
+    database_id: UUID = Path(...),
+    search_text: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    conns = get_connection_names(db, workspace_id, database_id, search_text)
+    data = [{"conn_name": c[0], "conn_id": c[1]} for c in conns]
+    return {
+        "status_code": 200,
+        "message": "success",
+        "data": data
+    }
+
+
+@router.get("/workspace/{workspace_id}/datasource/search")
+async def search_datasource_endpoint(
+    workspace_id: UUID = Path(...),
+    search_text: Optional[str] = Query(None),
+    connection_id: Optional[UUID] = Query(None),
+    db_type: Optional[UUID] = Query(None),
+    tags: Optional[str] = Query(None),
+    page: int = Query(0),
+    page_size: int = Query(6),
+    db: Session = Depends(get_db)
+):
+    
+    skip = page * page_size
+    result, total = search_datasources(db, workspace_id, search_text, connection_id, db_type, tags, skip, page_size)
+    return {
+        "status_code": 200,
+        "message": "success",
+        "data": result,
+        "count": total
+    }
+
+
+@router.get("/workspace/{workspace_id}/datasource/metadata_refresh/")
+async def refresh_metadata_endpoint(
+    workspace_id: UUID = Path(...),
+    datasource_ids: str = Query(...),
+    db: Session = Depends(get_db)
+):
+    try:
+        id_lists = [UUID(x.strip()) for x in datasource_ids.split(",")]
+    except Exception:
+        return {
+            "status_code": 404,
+            "message": "Invalid UUIDs"
+        }
+
+    data = refresh_metadata(db, id_lists)
+    if not data:
+        return {
+            "status_code": 404,
+            "message": "No valid datasource found",
+            "data": []
+        }
+    return {
+        "status_code": 200,
+        "message": "success",
+        "data": data
+    }
+
+
+@router.post("/workspace/{workspace_id}/datasource/{datasource_id}/update_metadata/")
+async def update_metadata_endpoint(workspace_id: UUID, datasource_id: UUID, db: Session = Depends(get_db)):
+    success, msg = update_metadata(db, datasource_id)
+    if success:
+        return {
+            "status_code": 200,
+            "message": "success",
+            "datasource_id": datasource_id
+        }
+    else:
+        # If msg indicates a failure condition, we can return 400 or 404 accordingly.
+        # For simplicity, let's return 400 if not found is indicated as well
+        # In a real scenario, differentiate 404 not found vs. 400 bad request
+        if "not found" in msg.lower():
+            raise HTTPException(status_code=404, detail=msg)
+        else:
+            return {
+                "status_code": 400,
+                "message": "failed",
+                "datasource_id": datasource_id
+            }
+
+
+
+
+
+
+
+
     
