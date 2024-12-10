@@ -3928,4 +3928,344 @@ async def update_metadata_endpoint(workspace_id: UUID, datasource_id: UUID, db: 
 
 
 
+
+
+
+db.py
+
+
+
+
+from sqlmodel import create_engine, Session,select
+from app.core.config import settings
+from app.models import User,UserCreate
+from app.core.auth.security import get_password_hash
+
+DATABASE_URL = "postgresql+psycopg2://swarm:swarm123@autobi2-postgres-service:5432/swarm"
+# DATABASE_URL = "sqlite:////app/autobi.db"
+engine = create_engine(DATABASE_URL, echo=True)
+
+
+FIRST_SUPERUSER="golla.narendra@verizon.com"
+FIRST_SUPERUSER_PASSWORD="Incedo&Verizon"
+def init_db(session: Session) -> None:
+    existing_user = session.exec(
+        select(User).where(
+            (User.username == "adminautobi") | (User.email == FIRST_SUPERUSER)
+        )
+    ).first()
+    if not existing_user:
+         # Hash the password
+        hashed_password = get_password_hash(FIRST_SUPERUSER_PASSWORD)
+        db_user = User(
+        username="adminautobi",
+        email=FIRST_SUPERUSER,
+        hashed_password=hashed_password,
+        full_name="Super Admin",
+        functional_role="super_admin",
+        is_super_user=True
+        )
+    
+
+        session.add(db_user)
+        session.commit()
+        session.refresh(db_user)
+
+
+
+
+
+
+seed.py
+
+
+
+import random
+import string
+import time
+from uuid import uuid4
+from datetime import datetime
+from sqlmodel import Session, SQLModel, create_engine, select
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from app.db import engine
+from models import (
+    Workspace, DatabaseType, Connection, Datasource, Metadata, Tag,
+    Domain, DomainDatasourceLink, AdminLLMModelSettings, KnowledgeBase,
+    KnowledgeBaseType, ConnectionStatus
+)
+
+# If your models are in the same file, adjust accordingly.
+# Setup the DB engine (adjust path as needed)
+
+# Helper functions
+def random_word(min_length=3, max_length=10):
+    length = random.randint(min_length, max_length)
+    return ''.join(random.choice(string.ascii_lowercase) for _ in range(length))
+
+def random_description():
+    words = [random_word() for _ in range(15)]
+    return ' '.join(words)
+
+def random_scores():
+    # "aggregation_support", "data_coverage", "schema_availability"
+    # scale of 100
+    return {
+        "aggregation_support": round(random.uniform(0, 100), 2),
+        "data_coverage": round(random.uniform(0, 100), 2),
+        "schema_availability": round(random.uniform(0, 100), 2)
+    }
+
+def random_connection_status():
+    # from the enum: in_progress, pass, fail
+    return random.choice(["in_progress", "pass", "fail"])
+
+def random_knowledgebase_type():
+    return random.choice([KnowledgeBaseType.KPIDEFINITION, KnowledgeBaseType.TARGETRESPONSE])
+
+def random_connection_status_for_kb():
+    return random.choice([ConnectionStatus.PASS, ConnectionStatus.FAIL, ConnectionStatus.INPROGRESS])
+
+# Start inserting data
+with Session(engine) as session:
+    # 1. Create 2-3 active workspaces
+    num_workspaces = random.randint(2, 3)
+    workspaces = []
+    for _ in range(num_workspaces):
+        ws = Workspace(
+            id=uuid4(),
+            description=random_description(),
+            is_public=False,
+            is_active=True
+        )
+        workspaces.append(ws)
+    session.add_all(workspaces)
+    session.commit()
+
+    # 2. Create database types: Postgres, MySQL, BigQuery, Oracle
+    db_types_list = ["Postgres", "MySQL", "BigQuery", "Oracle"]
+    db_types_map = {}
+    for dt_name in db_types_list:
+        dt = DatabaseType(
+            id=uuid4(),
+            name=dt_name
+        )
+        session.add(dt)
+        db_types_map[dt_name] = dt
+    session.commit()
+
+    # 3. Create some connections for each workspace
+    # Each workspace should have random connections with random db_types
+    connections = []
+    for ws in workspaces:
+        # Let's say each workspace has between 2 to 4 connections
+        num_connections = random.randint(2, 4)
+        for _ in range(num_connections):
+            dt = random.choice(list(db_types_map.values()))
+            conn = Connection(
+                id=uuid4(),
+                name="conn_" + random_word(),
+                db_type=dt.id,
+                workspace_id=ws.id
+            )
+            connections.append(conn)
+    session.add_all(connections)
+    session.commit()
+
+    # 4. For each connection, create 10-15 datasources
+    # Each datasource is linked to a connection and workspace
+    # Also create Metadata for each datasource
+    datasources = []
+    metadatas = []
+    tags_list = ["finance", "marketing", "hr", "sales", "analytics", "production", "something", "srk" , "deepika",
+                 "openai" , "google" , "gemini" , "microfost" , "eric" , "elon" , "doge", "twitter", "xmas"]
+
+    for conn in connections:
+        num_datasources = random.randint(10, 15)
+        for _ in range(num_datasources):
+            ds_id = uuid4()
+            ds_scores = random_scores()
+            # calculate db_score as average of these three
+            # db_score is not a field in the table, but we will store scores in metadata
+            # The search endpoints will compute db_score on the fly or we can just store these scores in metadata
+            # and compute in the response. We'll just store them in Metadata.scores.
+
+            ds = Datasource(
+                id=ds_id,
+                description=random_description(),
+                connection_string=conn.name,
+                last_updated_date=datetime.utcnow(),
+                last_metadata_refresh_date=datetime.utcnow(),
+                last_metadata_update_date=datetime.utcnow(),
+                chunk_id=uuid4(),
+                technology_type=conn.db_type,  # should point to a db_type
+                connection_id=conn.id,
+                workspace_id=conn.workspace_id,
+                # For simplicity, let's just name equal to random_word
+                # We'll ensure is_active is True (since we are testing active scenarios)
+                name="ds_" + random_word(),
+                is_active=True
+            )
+            datasources.append(ds)
+
+            # Create metadata
+            meta = Metadata(
+                id=uuid4(),
+                datasource_id=ds_id,
+                is_connected=random_connection_status(),
+                schema_definition_status=random_connection_status(),
+                statistics_status=random_connection_status(),
+                scores=ds_scores,
+                db_score= round(random.uniform(0, 100), 2)
+            )
+            metadatas.append(meta)
+
+    session.add_all(datasources)
+    session.add_all(metadatas)
+    session.commit()
+
+    # Add random tags to some datasources
+    # We'll randomly pick some datasources and assign random tags
+    all_ds_ids = [d.id for d in datasources]
+    random.shuffle(all_ds_ids)
+    # Let's say half of them get tags
+    tagged_ds_ids = all_ds_ids[:int(len(all_ds_ids)//1.3)]
+
+    tags_objs = []
+    for ds_id in tagged_ds_ids:
+        # assign 1-3 random tags
+        num_tags = random.randint(1, 5)
+        chosen_tags = random.sample(tags_list, num_tags)
+        for tg in chosen_tags:
+            t = Tag(
+                id=uuid4(),
+                object_type="datasource",
+                object_id=ds_id,
+                tag_name=tg,
+            )
+            tags_objs.append(t)
+
+    session.add_all(tags_objs)
+    session.commit()
+
+print("Database has been populated successfully!")
+
+print("Populating with Domains, llm models, Knowledge Bases, Tags and linking datasaources with Domains..")
+time.sleep(2)
+
+# Assuming engine already created and tables are up from previous script
+
+with Session(engine) as session:
+    # Retrieve previously created workspaces, connections, datasources, db_types
+    workspaces = session.exec(select(Workspace)).all()
+    db_types = session.exec(select(DatabaseType)).all()
+    connections = session.exec(select(Connection)).all()
+    datasources = session.exec(select(Datasource)).all()
+
+    # Create a few AdminLLMModelSettings
+    llm_models = []
+    for _ in range(3):
+        llm = AdminLLMModelSettings(
+            id=uuid4(),
+            llm_model_name="llm_" + random_word(),
+            provider_id=uuid4(),
+            llm_base_endpoint_url="https://example-llm.com/api",
+            llm_api_token="secret_token_" + random_word(),
+            is_configured=True
+        )
+        llm_models.append(llm)
+    session.add_all(llm_models)
+    session.commit()
+
+    # We'll re-use the same tag_list as for datasources
+    tags_list = ["finance", "marketing", "hr", "sales", "analytics", "production", "elon" , "musk" , "doge",
+                 "twitter" , "autobi" , "cherla" , "incedo"]
+
+    # Create domains
+    # For each workspace, create some domains (2-5)
+    domains = []
+    knowledgebases = []
+    domain_tag_objs = []
+    domain_datasource_links = []
+    for ws in workspaces:
+        # Filter connections that belong to this workspace
+        ws_connections = [c for c in connections if c.workspace_id == ws.id]
+        if not ws_connections:
+            # If no connections for this workspace, skip domain creation or make connection_id None
+            continue
+
+        num_domains = random.randint(2, 5)
+        for _ in range(num_domains):
+            # Pick a random connection for this domain
+            conn = random.choice(ws_connections)
+            # Pick a random llm model
+            llm_model = random.choice(llm_models)
+
+            dom_id = uuid4()
+            dom = Domain(
+                id=dom_id,
+                name="dom_" + random_word(),
+                description=random_description(),
+                purpose=random_description(),
+                is_active=True,
+                workspace_id=ws.id,
+                connection_id=conn.id,
+                default_llm_model=llm_model.id,
+                knowledgebase_validation_status=random_connection_status(),
+                last_updated_date=datetime.utcnow(),
+                last_metadata_refresh_date=datetime.utcnow(),
+                last_metadata_update_date=datetime.utcnow()
+            )
+            domains.append(dom)
+
+            # Add a KnowledgeBase entry or multiple entries for this domain
+            num_kb = random.randint(1, 3)
+            for _kb in range(num_kb):
+                kb = KnowledgeBase(
+                    id=uuid4(),
+                    domain_id=dom_id,
+                    knowledgebase_type=random_knowledgebase_type(),
+                    value={"sample_key": "sample_value"},
+                    status=random_connection_status_for_kb(),
+                    knowledgebase_chunk_id=uuid4()
+                )
+                knowledgebases.append(kb)
+
+            # Assign tags to domain
+            num_tags = random.randint(3, 7)
+            chosen_tags = random.sample(tags_list, num_tags)
+            for tg in chosen_tags:
+                t = Tag(
+                    id=uuid4(),
+                    object_type="domain",
+                    object_id=dom_id,
+                    tag_name=tg
+                )
+                domain_tag_objs.append(t)
+
+            # Associate datasources with domain
+            # Filter datasources that belong to the same workspace
+            ws_datasources = [ds for ds in datasources if ds.workspace_id == ws.id and ds.is_active]
+            # Pick random 2-4 datasources
+            if ws_datasources:
+                link_count = random.randint(2, min(4, len(ws_datasources)))
+                linked_ds = random.sample(ws_datasources, link_count)
+                for dds in linked_ds:
+                    dlink = DomainDatasourceLink(
+                        domain_id=dom_id,
+                        datasource_id=dds.id
+                    )
+                    domain_datasource_links.append(dlink)
+
+    session.add_all(domains)
+    session.add_all(knowledgebases)
+    session.add_all(domain_tag_objs)
+    session.add_all(domain_datasource_links)
+    session.commit()
+
+print("Database seeded with domains, tags, knowledgebases, and domain-datasource links!")
+
+
+
     
