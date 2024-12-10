@@ -4268,4 +4268,174 @@ print("Database seeded with domains, tags, knowledgebases, and domain-datasource
 
 
 
-    
+
+
+
+
+
+
+from sqlmodel import create_engine, Session, select
+from app.core.config import settings
+from app.models import User, Workspace, Domain, Datasource
+from app.core.auth.security import get_password_hash
+from datetime import datetime
+
+DATABASE_URL = "postgresql+psycopg2://swarm:swarm123@autobi2-postgres-service:5432/swarm"
+engine = create_engine(DATABASE_URL, echo=True)
+
+FIRST_SUPERUSER = "golla.narendra@verizon.com"
+FIRST_SUPERUSER_PASSWORD = "Incedo&Verizon"
+
+# Initialize the database
+def init_db(session: Session) -> None:
+    # Check if superuser exists
+    existing_user = session.exec(
+        select(User).where(
+            (User.username == "adminautobi") | (User.email == FIRST_SUPERUSER)
+        )
+    ).first()
+    if not existing_user:
+        hashed_password = get_password_hash(FIRST_SUPERUSER_PASSWORD)
+        superuser = User(
+            username="adminautobi",
+            email=FIRST_SUPERUSER,
+            hashed_password=hashed_password,
+            full_name="Super Admin",
+            functional_role="super_admin",
+            is_super_user=True,
+            created=datetime.utcnow(),
+            last_updated=datetime.utcnow(),
+            is_first_login=True,
+            workspaces=[],
+            favourited_workspaces=[],
+            requests_raised=[],
+            api_key="SUPERUSER_API_KEY",
+        )
+        session.add(superuser)
+        session.commit()
+        session.refresh(superuser)
+
+# Add a new user or check if it already exists
+def add_user(session: Session, user_data: dict) -> User:
+    existing_user = session.exec(select(User).where(User.email == user_data["email"])).first()
+    if existing_user:
+        return existing_user
+
+    hashed_password = get_password_hash(user_data["password"])
+    new_user = User(
+        username=user_data["username"],
+        email=user_data["email"],
+        hashed_password=hashed_password,
+        full_name=user_data["full_name"],
+        functional_role=user_data["functional_role"],
+        is_super_user=user_data.get("is_super_user", False),
+        created=datetime.utcnow(),
+        last_updated=datetime.utcnow(),
+        is_first_login=True,
+        workspaces=[],
+        favourited_workspaces=[],
+        requests_raised=[],
+        api_key=user_data.get("api_key", "DEFAULT_API_KEY"),
+    )
+    session.add(new_user)
+    session.commit()
+    session.refresh(new_user)
+    return new_user
+
+# Add a new workspace or check if it already exists
+def add_workspace(session: Session, workspace_data: dict) -> Workspace:
+    existing_workspace = session.exec(
+        select(Workspace).where(Workspace.organization_id == workspace_data["organization_id"])
+    ).first()
+    if existing_workspace:
+        return existing_workspace
+
+    new_workspace = Workspace(
+        organization_id=workspace_data["organization_id"],
+        created_by_id=workspace_data["created_by_id"],
+        created_date=datetime.utcnow(),
+        last_updated_date=datetime.utcnow(),
+        tags=workspace_data.get("tags", []),
+        users=workspace_data.get("users", []),
+        favourited_by=workspace_data.get("favourited_by", []),
+        domains=[],
+        datasources=[],
+        request_access=workspace_data.get("request_access", False),
+        api_key=workspace_data.get("api_key", "WORKSPACE_API_KEY"),
+    )
+    session.add(new_workspace)
+    session.commit()
+    session.refresh(new_workspace)
+    return new_workspace
+
+# Add a new domain or check if it already exists
+def add_domain(session: Session, workspace_id: int, domain_name: str) -> Domain:
+    existing_domain = session.exec(
+        select(Domain).where(Domain.name == domain_name, Domain.workspace_id == workspace_id)
+    ).first()
+    if existing_domain:
+        return existing_domain
+
+    new_domain = Domain(
+        name=domain_name,
+        workspace_id=workspace_id,
+        created_date=datetime.utcnow(),
+        last_updated_date=datetime.utcnow(),
+    )
+    session.add(new_domain)
+    session.commit()
+    session.refresh(new_domain)
+    return new_domain
+
+# Add a new data source or check if it already exists
+def add_datasource(session: Session, workspace_id: int, datasource_name: str) -> Datasource:
+    existing_datasource = session.exec(
+        select(Datasource).where(
+            Datasource.name == datasource_name, Datasource.workspace_id == workspace_id
+        )
+    ).first()
+    if existing_datasource:
+        return existing_datasource
+
+    new_datasource = Datasource(
+        name=datasource_name,
+        workspace_id=workspace_id,
+        created_date=datetime.utcnow(),
+        last_updated_date=datetime.utcnow(),
+    )
+    session.add(new_datasource)
+    session.commit()
+    session.refresh(new_datasource)
+    return new_datasource
+
+# Example flow
+def main():
+    with Session(engine) as session:
+        # Initialize DB with superuser
+        init_db(session)
+
+        # Add a user
+        user_data = {
+            "username": "testuser",
+            "email": "testuser@example.com",
+            "password": "securepassword",
+            "full_name": "Test User",
+            "functional_role": "admin",
+        }
+        user = add_user(session, user_data)
+
+        # Add a workspace
+        workspace_data = {
+            "organization_id": "org_123",
+            "created_by_id": user.id,
+        }
+        workspace = add_workspace(session, workspace_data)
+
+        # Add a domain
+        domain = add_domain(session, workspace.id, "Test Domain")
+
+        # Add a data source
+        datasource = add_datasource(session, workspace.id, "Test Datasource")
+
+if __name__ == "__main__":
+    main()
