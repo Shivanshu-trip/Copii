@@ -5204,7 +5204,109 @@ class AdminEmbeddingProviderSettings(AdminEmbeddingProviderSettingsBase, table=T
     __table_args__ = (
         UniqueConstraint("embedding_provider_name", name="uix_embedding_provider_name"),
     )
-    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    id: UUID = Field(
+default_factory=uuid4, primary_key=True)
+
+
+
+
+
+
+
+
+
+
+
+
+import uuid
+from datetime import datetime, timezone
+from sqlmodel import Session, select
+from database import engine  # Import your database engine setup
+
+# Create Random Users
+def create_users(session, num_users=4):
+    users = []
+    for _ in range(num_users):
+        user = User(
+            id=uuid.uuid4(),
+            name=f"User_{uuid.uuid4().hex[:6]}",
+            email=f"user{uuid.uuid4().hex[:6]}@example.com",
+            created_at=datetime.now(timezone.utc),
+        )
+        session.add(user)
+        users.append(user)
+    session.commit()
+    return users
+
+# Create Workspaces for Users
+def create_workspaces(session, users, num_workspaces=4):
+    workspaces = []
+    for user in users:
+        for _ in range(num_workspaces):
+            workspace = Workspace(
+                id=uuid.uuid4(),
+                name=f"Workspace_{uuid.uuid4().hex[:6]}",
+                user_id=user.id,
+                created_at=datetime.now(timezone.utc),
+            )
+            session.add(workspace)
+            workspaces.append(workspace)
+    session.commit()
+    return workspaces
+
+# Create Domains for Workspaces
+def create_domains(session, workspaces, num_domains=4):
+    domains = []
+    for workspace in workspaces:
+        for _ in range(num_domains):
+            domain = Domain(
+                id=uuid.uuid4(),
+                name=f"Domain_{uuid.uuid4().hex[:6]}",
+                workspace_id=workspace.id,
+                created_at=datetime.now(timezone.utc),
+            )
+            session.add(domain)
+            domains.append(domain)
+    session.commit()
+    return domains
+
+# Create DataSources for Domains
+def create_data_sources(session, domains, num_data_sources=4):
+    data_sources = []
+    for domain in domains:
+        for _ in range(num_data_sources):
+            data_source = DataSource(
+                id=uuid.uuid4(),
+                name=f"DataSource_{uuid.uuid4().hex[:6]}",
+                domain_id=domain.id,
+                created_at=datetime.now(timezone.utc),
+            )
+            session.add(data_source)
+            data_sources.append(data_source)
+    session.commit()
+    return data_sources
+
+# Main Function
+def main():
+    with Session(engine) as session:
+        # Step 1: Create Users
+        users = create_users(session)
+
+        # Step 2: Create Workspaces
+        workspaces = create_workspaces(session, users)
+
+        # Step 3: Create Domains
+        domains = create_domains(session, workspaces)
+
+        # Step 4: Create Data Sources
+        data_sources = create_data_sources(session, domains)
+
+        print(f"Created {len(users)} users, {len(workspaces)} workspaces, {len(domains)} domains, {len(data_sources)} data sources.")
+
+# Run the Main Function
+if __name__ == "__main__":
+    main()
+
 
     models : List["AdminEmbeddingModelSettings"] = Relationship(back_populates="provider")
 
